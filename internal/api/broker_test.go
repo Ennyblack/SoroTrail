@@ -5,92 +5,129 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/sorotrail/sorotrail/internal/store"
 )
 
-func TestTopicMatches(t *testing.T) {
+func TestEventMatches(t *testing.T) {
+	event := store.Event{
+		ID:         "evt-1",
+		ContractID: "CAAAAA...",
+		Ledger:     100,
+		Type:       "payment",
+		Topics:     json.RawMessage(`["payment"]`),
+	}
+
 	tests := []struct {
 		name   string
-		topics json.RawMessage
-		topic  json.RawMessage
+		filter store.EventFilter
+		event  store.Event
 		want   bool
 	}{
 		{
-			name:   "identical string topic matches",
-			topics: json.RawMessage(`["payment"]`),
-			topic:  json.RawMessage(`"payment"`),
+			name:   "empty filter matches every event",
+			filter: store.EventFilter{},
+			event:  event,
 			want:   true,
 		},
 		{
-			name:   "different string topic does not match",
-			topics: json.RawMessage(`["payment"]`),
-			topic:  json.RawMessage(`"mint"`),
-			want:   false,
+			name: "contract-id filter matches",
+			filter: store.EventFilter{
+				ContractID: "CAAAAA...",
+			},
+			event: event,
+			want:  true,
 		},
 		{
-			name:   "identical object topic matches",
-			topics: json.RawMessage(`[{"type":"payment"}]`),
-			topic:  json.RawMessage(`{"type":"payment"}`),
-			want:   true,
+			name: "contract-id filter excludes other contracts",
+			filter: store.EventFilter{
+				ContractID: "CBBBBB...",
+			},
+			event: event,
+			want:  false,
 		},
 		{
-			name:   "different object topic does not match",
-			topics: json.RawMessage(`[{"type":"payment"}]`),
-			topic:  json.RawMessage(`{"type":"mint"}`),
-			want:   false,
+			name: "from-ledger excludes events before range",
+			filter: store.EventFilter{
+				FromLedger: 200,
+			},
+			event: event,
+			want:  false,
 		},
 		{
-			name:   "whitespace differences do not break matching",
-			topics: json.RawMessage(`[{"type":"payment"}]`),
-			topic:  json.RawMessage(`{  "type" : "payment" }`),
-			want:   true,
+			name: "to-ledger excludes events after range",
+			filter: store.EventFilter{
+				ToLedger: 50,
+			},
+			event: event,
+			want:  false,
 		},
 		{
-			name:   "empty topics returns false",
-			topics: json.RawMessage(`[]`),
-			topic:  json.RawMessage(`"payment"`),
-			want:   false,
+			name: "ledger range includes event",
+			filter: store.EventFilter{
+				FromLedger: 50,
+				ToLedger:   200,
+			},
+			event: event,
+			want:  true,
 		},
 		{
-			name:   "nil topics returns false",
-			topics: nil,
-			topic:  json.RawMessage(`"payment"`),
-			want:   false,
+			name: "type filter matches",
+			filter: store.EventFilter{
+				Types: []string{"payment"},
+			},
+			event: event,
+			want:  true,
 		},
 		{
-			name:   "empty topic returns false",
-			topics: json.RawMessage(`["payment"]`),
-			topic:  json.RawMessage(``),
-			want:   false,
+			name: "type filter excludes",
+			filter: store.EventFilter{
+				Types: []string{"mint"},
+			},
+			event: event,
+			want:  false,
 		},
 		{
-			name:   "nil topic returns false",
-			topics: json.RawMessage(`["payment"]`),
-			topic:  nil,
-			want:   false,
+			name: "topic filter matches",
+			filter: store.EventFilter{
+				Topic: json.RawMessage(`"payment"`),
+			},
+			event: event,
+			want:  true,
 		},
 		{
-			name:   "malformed topics JSON is rejected without panic",
-			topics: json.RawMessage(`not-json`),
-			topic:  json.RawMessage(`"payment"`),
-			want:   false,
+			name: "topic filter excludes",
+			filter: store.EventFilter{
+				Topic: json.RawMessage(`"mint"`),
+			},
+			event: event,
+			want:  false,
 		},
 		{
-			name:   "match found in multi-element array",
-			topics: json.RawMessage(`["mint","payment","contract"]`),
-			topic:  json.RawMessage(`"payment"`),
-			want:   true,
+			name: "combined filters must all match",
+			filter: store.EventFilter{
+				ContractID: "CAAAAA...",
+				Types:      []string{"payment"},
+				Topic:      json.RawMessage(`"payment"`),
+			},
+			event: event,
+			want:  true,
 		},
 		{
-			name:   "topic not present in multi-element array",
-			topics: json.RawMessage(`["mint","contract"]`),
-			topic:  json.RawMessage(`"payment"`),
-			want:   false,
+			name: "combined filters fail if any does not match",
+			filter: store.EventFilter{
+				ContractID: "CAAAAA...",
+				Types:      []string{"mint"},
+				Topic:      json.RawMessage(`"payment"`),
+			},
+			event: event,
+			want:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := topicMatches(tt.topics, tt.topic)
+			got := eventMatches(tt.filter, tt.event)
 			assert.Equal(t, tt.want, got)
 		})
 	}
